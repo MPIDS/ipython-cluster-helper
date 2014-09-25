@@ -376,7 +376,7 @@ echo 5 + $SGE_TASK_ID \* 0.5 | bc | xargs sleep
     )
     )
 
-    def start(self):
+    def start(self, n):
 
         if self.queue:
             self.context["queue"] = "#$ -q {}".format(self.queue)
@@ -387,7 +387,7 @@ echo 5 + $SGE_TASK_ID \* 0.5 | bc | xargs sleep
             self.executable if self.executable else sys.executable
         )
 
-        return super(NLDSGEEngineSetLauncher, self).start()
+        return super(NLDSGEEngineSetLauncher, self).start(n)
 
 
 class NLDSGEControllerLauncher(launcher.SGEControllerLauncher):
