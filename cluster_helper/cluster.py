@@ -59,7 +59,9 @@ DEFAULT_MEM_PER_CPU = 1000  # Mb
 # Makes engine pingback shutdown higher, since this is
 # not consecutive misses.
 timeout_params = ["--timeout=960", "--IPEngineApp.wait_for_url_file=960",
-                  "--EngineFactory.max_heartbeat_misses=120"]
+                  "--EngineFactory.max_heartbeat_misses=120",
+                  "--EngineFactory.timeout=960.0"
+                  ]
 controller_params = ["--nodb", "--hwm=1", "--scheme=leastload",
                      "--HeartMonitor.max_heartmonitor_misses=120",
                      "--HeartMonitor.period=60000"]
@@ -975,7 +977,8 @@ def _scheduler_resources(scheduler, params, queue):
 
 
 def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
-           extra_params, executable, ssh_client=None, cluster='Bcbio'):
+           extra_params, executable, ssh_client=None, cluster='Bcbio',
+           work_dir=None):
     """Starts cluster from commandline.
     """
     ns = "cluster_helper.cluster"
@@ -1035,6 +1038,8 @@ def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
          "--{}Launcher.queue='{}'".format(scheduler, queue),
          "--cluster-id={}".format(cluster_id),
          ]
+    if work_dir is not None:
+       args += ["--IPClusterEngines.work_dir={}".format(work_dir)]
     args += _get_profile_args(profile)
     if mincores > 1 and mincores > cores_per_job:
         args += ["--{}.numengines={}".format(engine_class, mincores)]
@@ -1108,7 +1113,7 @@ def cluster_view(
     queue, num_jobs,
     sshhostname=None, sshuser=None, sshport=22, sshkey=None, sshpassword=None,
     executable=sys.executable,
-    cluster='Bcbio',
+    cluster='Bcbio', work_dir=None,
     scheduler='sge', cores_per_job=1, profile=None,
     start_wait=16, extra_params=None, retries=None, direct=False
 ):
@@ -1148,12 +1153,14 @@ def cluster_view(
     if extra_params is None:
         extra_params = {}
     max_delay = start_wait * 60
-    delay = 5 if extra_params.get("run_local") else 30
+    delay = 5 if extra_params.get("run_local") else 15
     max_tries = 10
 
     if profile is None:
         has_throwaway = True
         profile = create_throwaway_profile(executable, ssh_client)
+        print("Created profile {}".format(profile))
+        sys.stdout.flush()
     else:
         # ensure we have an .ipython directory to prevent issues
         # creating it during parallel startup
@@ -1174,6 +1181,8 @@ def cluster_view(
     num_tries = 0
 
     cluster_id = str(uuid.uuid4())
+    print("Cluster ID: {}".format(cluster_id))
+    sys.stdout.flush()
 
     while 1:
         try:
@@ -1183,20 +1192,26 @@ def cluster_view(
                 _start(
                     scheduler, profile, queue, num_jobs,
                     cores_per_job, cluster_id, extra_params,
-                    executable, ssh_client, cluster=cluster
+                    executable, ssh_client, cluster=cluster, work_dir=work_dir
                 )
+                print("Cluster started.")
+                sys.stdout.flush()
             break
         except subprocess.CalledProcessError:
             if num_tries > max_tries:
                 raise
             num_tries += 1
             time.sleep(delay)
+            print("Retry to start cluster...")
+            sys.stdout.flush()
 
     try:
         url_file, profile_dir = get_url_file(
             profile, cluster_id, executable,
             ssh_client=ssh_client, timeout=start_wait * 60
         )
+        print("URL file: {}".format(url_file))
+        sys.stdout.flush()
 
         need_engines = 1  # Start using cluster when this many engines are up
         client = None
@@ -1208,6 +1223,8 @@ def cluster_view(
                 url_file,
                 sshserver=sshserver, sshkey=sshkey, sshpassword=sshpassword
             )
+            print("{} engines up.".format(up))
+            sys.stdout.flush()
             if up < max_up:
                 print(
                     "Engine(s) that were up have shutdown prematurely. "
@@ -1228,7 +1245,11 @@ def cluster_view(
             view = _get_direct_view(client, retries)
         else:
             view = _get_balanced_blocked_view(client, retries)
-        view.clusterhelper = {"profile": profile, "cluster_id": cluster_id}
+        view.clusterhelper = {
+            "profile": profile,
+            "cluster_id": cluster_id,
+            "client": client,
+        }
         if dill:
             pickleutil.use_dill()
             view.apply(pickleutil.use_dill)
@@ -1238,7 +1259,8 @@ def cluster_view(
             _shutdown(client)
         _stop(profile, cluster_id, executable, ssh_client)
         if has_throwaway:
-            delete_profile(profile_dir, ssh_client)
+            delete_profile(profile_dir, cluster_id, ssh_client)
+        ssh_client.close()
 
 
 def _nengines_up(url_file, sshserver=None, sshkey=None, sshpassword=None):
@@ -1340,7 +1362,7 @@ def get_url_file(profile, cluster_id, executable, ssh_client=None, timeout=60):
     ).format(executable, profile)
 
     remote_profile_dir = ssh_client.exec_command(
-        'source ~/.profile > \dev\null; ' + remote_cmd
+        'source ~/.profile > /dev/null; ' + remote_cmd
     )[1].read().decode('utf-8').strip()
 
     remote_url_file = os.path.join(
@@ -1372,7 +1394,7 @@ def get_url_file(profile, cluster_id, executable, ssh_client=None, timeout=60):
     return os.path.join(local_file), remote_profile_dir
 
 
-def delete_profile(profile_dir, ssh_client=None):
+def delete_profile(profile_dir, cluster_id, ssh_client=None):
     MAX_TRIES = 10
     dir_to_remove = profile_dir
 
@@ -1400,8 +1422,9 @@ def delete_profile(profile_dir, ssh_client=None):
                             "something is wrong.".format(dir_to_remove))
     else:
         ssh_client.exec_command(
-            'test -e {0} && rm -rf {1}'.format(
+            'for (( i=1; i <= 10; i++)); do if ! [ -e {1}/pid/ipcluster-{2}.pid ]; then sleep 5; test -e {0} && rm -rf {1}; break; fi; sleep 5; done'.format(
                 os.path.join(profile_dir, 'ipython_config.py'),
-                profile_dir
+                profile_dir,
+                cluster_id
             )
         )
