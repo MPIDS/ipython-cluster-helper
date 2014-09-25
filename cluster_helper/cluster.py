@@ -357,8 +357,8 @@ echo \($SGE_TASK_ID - 1\) \* 0.5 | bc | xargs sleep
 class NLDSGEEngineSetLauncher(launcher.SGEEngineSetLauncher):
     batch_file_name = Unicode("sge_engine" + str(uuid.uuid4()))
     queue_template = Unicode('')
-    executable = Unicode('')
-    default_template = Unicode('''#$ -S /bin/bash
+    executable = traitlets.Unicode('', config=True)
+    default_template = traitlets.Unicode('''#$ -S /bin/bash
 #$ -cwd
 #$ -N ipeng_{cluster_id}
 #$ -t 1-{n}
@@ -397,8 +397,8 @@ echo 5 + $SGE_TASK_ID \* 0.5 | bc | xargs sleep
 class NLDSGEControllerLauncher(launcher.SGEControllerLauncher):
     batch_file_name = Unicode("sge_controller" + str(uuid.uuid4()))
     queue_template = Unicode('')
-    executable = Unicode('')
-    default_template = Unicode('''#$ -S /bin/bash
+    executable = traitlets.Unicode('', config=True)
+    default_template = traitlets.Unicode('''#$ -S /bin/bash
 #$ -cwd
 #$ -N ipctrl_{cluster_id}
 {queue}
