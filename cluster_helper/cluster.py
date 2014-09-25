@@ -145,10 +145,9 @@ resource_cmds = [
 ]
 
 start_cmd = "from IPython.parallel.apps.{} import launch_new_instance"
-engine_cmd_argv = [sys.executable, "-E", "-c"] + [
+engine_cmd_argv = ["-E", "-c"] + [
     "; ".join(
-        resource_cmds +
-        [
+        resource_cmds + [
             start_cmd.format("ipengineapp"),
             "launch_new_instance()"
         ]
@@ -351,6 +350,44 @@ echo \($SGE_TASK_ID - 1\) \* 0.5 | bc | xargs sleep
         ])
         self.context["exports"] = _local_environment_exports()
         return super(BcbioSGEEngineSetLauncher, self).start(n)
+
+
+class NLDSGEEngineSetLauncher(launcher.SGEEngineSetLauncher):
+    batch_file_name = Unicode("sge_engine" + str(uuid.uuid4()))
+    queue_template = Unicode('')
+    executable = Unicode('')
+    default_template = Unicode('''#$ -S /bin/bash
+#$ -cwd
+#$ -N ipeng_{cluster_id}
+#$ -t 1-{n}
+#$ -e /dev/null
+#$ -o /dev/null
+{queue}
+
+mkdir -p $JOB_ID.err
+mkdir -p $JOB_ID.out
+
+echo 5 + $SGE_TASK_ID \* 0.5 | bc | xargs sleep
+
+{executable} %s --profile-dir="{profile_dir}" --cluster-id="{cluster_id}" %s >$JOB_ID.out/$SGE_TASK_ID 2>$JOB_ID.err/$SGE_TASK_ID
+''' % (
+        ' '.join(map(shlex.quote, engine_cmd_argv)),
+        ' '.join(timeout_params),
+    )
+    )
+
+    def start(self):
+
+        if self.queue:
+            self.context["queue"] = "#$ -q {}".format(self.queue)
+        else:
+            self.context["queue"] = ""
+
+        self.context['executable'] = (
+            self.executable if self.executable else sys.executable
+        )
+
+        return super(NLDSGEEngineSetLauncher, self).start()
 
 
 class NLDSGEControllerLauncher(launcher.SGEControllerLauncher):
@@ -945,7 +982,7 @@ def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
     scheduler = scheduler.upper()
     if scheduler == "SLURM" and _slurm_is_old():
         scheduler = "OLDSLURM"
-    engine_class = "Bcbio{}EngineSetLauncher".format(scheduler)
+    engine_class = "{}{}EngineSetLauncher".format(cluster, scheduler)
     controller_class = "{}{}ControllerLauncher".format(cluster, scheduler)
     if not (engine_class in globals() and controller_class in globals()):
         print(
