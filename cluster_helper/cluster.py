@@ -19,6 +19,7 @@ import math
 import os
 import pipes
 import uuid
+import shlex
 import shutil
 import subprocess
 import time
@@ -144,43 +145,40 @@ resource_cmds = [
 ]
 
 start_cmd = "from IPython.parallel.apps.{} import launch_new_instance"
-engine_cmd_argv = [sys.executable, "-E", "-c"] + \
-    [
-        "; ".join(
-            resource_cmds +
-            [
-                start_cmd.format("ipengineapp"),
-                "launch_new_instance()"
-            ]
-        )
-    ]
-cluster_cmd_argv = ["-E", "-c"] + \
-    [
-        '"' +
-        "; ".join(
-            resource_cmds + [
-                start_cmd.format("ipclusterapp"), "launch_new_instance()"
-            ]
-        )
-        + '"'
-    ]
-# controller_cmd_argv = [sys.executable, "-E", "-c"] + \
-#     [
-#         "; ".join(
-#             resource_cmds + [
-#                 start_cmd % "ipcontrollerapp", "launch_new_instance()"
-#             ]
-#         )
-#     ]
-controller_cmd_argv = [sys.executable, "-E", "-c"] + \
-    [
-        "; ".join(
-            resource_cmds + [
-                "from cluster_helper.cluster import VMFixIPControllerApp",
-                "VMFixIPControllerApp.launch_instance()"
-            ]
-        )
-    ]
+engine_cmd_argv = [sys.executable, "-E", "-c"] + [
+    "; ".join(
+        resource_cmds +
+        [
+            start_cmd.format("ipengineapp"),
+            "launch_new_instance()"
+        ]
+    )
+]
+cluster_cmd_argv = ["-E", "-c"] + [
+    '"' +
+    "; ".join(
+        resource_cmds + [
+            start_cmd.format("ipclusterapp"), "launch_new_instance()"
+        ]
+    )
+    + '"'
+]
+controller_cmd_argv = ["-E", "-c"] + [
+    "; ".join(
+        resource_cmds + [
+            start_cmd.format("ipcontrollerapp"), "launch_new_instance()"
+        ]
+    )
+]
+#controller_cmd_argv = [sys.executable, "-E", "-c"] + \
+#    [
+#        "; ".join(
+#            resource_cmds + [
+#                "from cluster_helper.cluster import VMFixIPControllerApp",
+#                "VMFixIPControllerApp.launch_instance()"
+#            ]
+#        )
+#    ]
 
 
 def get_engine_commands(context, n):
@@ -355,6 +353,39 @@ echo \($SGE_TASK_ID - 1\) \* 0.5 | bc | xargs sleep
         return super(BcbioSGEEngineSetLauncher, self).start(n)
 
 
+class NLDSGEControllerLauncher(launcher.SGEControllerLauncher):
+    batch_file_name = Unicode("sge_controller" + str(uuid.uuid4()))
+    queue_template = Unicode('')
+    default_template = Unicode('''#$ -S /bin/bash
+#$ -cwd
+#$ -N ipctrl_{cluster_id}
+{queue}
+{executable} %s --ip=* --log-to-file --profile-dir="{profile_dir}" --cluster-id="{cluster_id}" %s
+''' % (
+        ' '.join(map(shlex.quote, controller_cmd_argv)),
+        ' '.join(controller_params),
+    )
+    )
+
+    def start(self):
+
+        self.context["resources"] = "\n".join([
+            _prep_sge_resource(r)
+            for r in str(self.resources).split(";")
+            if r.strip()
+        ])
+        if self.queue:
+            self.context["queue"] = "#$ -q {}".format(self.queue)
+        else:
+            self.context["queue"] = ""
+
+        self.context['executable'] = (
+            self.executable if self.executable else sys.executable
+        )
+
+        return super(NLDSGEControllerLauncher, self).start()
+
+
 class BcbioSGEControllerLauncher(launcher.SGEControllerLauncher):
     batch_file_name = Unicode(str("sge_controller" + str(uuid.uuid4())))
     tag = traitlets.Unicode("", config=True)
@@ -376,7 +407,7 @@ class BcbioSGEControllerLauncher(launcher.SGEControllerLauncher):
        ' '.join(controller_params)))
 
     def start(self):
-        self.context["cores"] = "#$ -pe %s %s".format(
+        self.context["cores"] = "#$ -pe {} {}".format(
             self.pename, self.cores
         ) if self.cores > 1 else ""
         self.context["tag"] = self.tag if self.tag else "bcbio"
@@ -911,7 +942,7 @@ def _scheduler_resources(scheduler, params, queue):
 
 
 def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
-           extra_params, executable, ssh_client=None):
+           extra_params, executable, ssh_client=None, cluster='Bcbio'):
     """Starts cluster from commandline.
     """
     ns = "cluster_helper.cluster"
@@ -919,7 +950,7 @@ def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
     if scheduler == "SLURM" and _slurm_is_old():
         scheduler = "OLDSLURM"
     engine_class = "Bcbio{}EngineSetLauncher".format(scheduler)
-    controller_class = "Bcbio{}ControllerLauncher".format(scheduler)
+    controller_class = "{}{}ControllerLauncher".format(cluster, scheduler)
     if not (engine_class in globals() and controller_class in globals()):
         print(
             "The engine and controller class {} and {} are not "
@@ -960,6 +991,8 @@ def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
          "--{}.mem='{}'".format(controller_class, extra_params.get("mem", "")),
          "--{}.tag='{}'".format(engine_class, extra_params.get("tag", "")),
          "--{}.tag='{}'".format(controller_class, extra_params.get("tag", "")),
+         "--{}.executable='{}'".format(engine_class, extra_params.get("executable", "")),
+         "--{}.executable='{}'".format(controller_class, extra_params.get("executable", "")),
          "--IPClusterStart.controller_launcher_class={}.{}".format(
              ns, controller_class
          ),
@@ -1042,6 +1075,7 @@ def cluster_view(
     queue, num_jobs,
     sshhostname=None, sshuser=None, sshport=22, sshkey=None, sshpassword=None,
     executable=sys.executable,
+    cluster='Bcbio',
     scheduler='sge', cores_per_job=1, profile=None,
     start_wait=16, extra_params=None, retries=None, direct=False
 ):
@@ -1116,7 +1150,7 @@ def cluster_view(
                 _start(
                     scheduler, profile, queue, num_jobs,
                     cores_per_job, cluster_id, extra_params,
-                    executable, ssh_client
+                    executable, ssh_client, cluster=cluster
                 )
             break
         except subprocess.CalledProcessError:
