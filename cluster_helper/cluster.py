@@ -386,7 +386,9 @@ echo 5 + $SGE_TASK_ID \* 0.5 | bc | xargs sleep
             self.context["queue"] = ""
 
         self.context['executable'] = (
-            self.executable if self.executable else sys.executable
+            self.executable.replace('@', '$')
+            if self.executable
+            else sys.executable
         )
 
         return super(NLDSGEEngineSetLauncher, self).start(n)
@@ -415,7 +417,9 @@ class NLDSGEControllerLauncher(launcher.SGEControllerLauncher):
             self.context["queue"] = ""
 
         self.context['executable'] = (
-            self.executable if self.executable else sys.executable
+            self.executable.replace('@', '$')
+            if self.executable
+            else sys.executable
         )
 
         return super(NLDSGEControllerLauncher, self).start()
@@ -1027,8 +1031,8 @@ def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
          "--{}.mem='{}'".format(controller_class, extra_params.get("mem", "")),
          "--{}.tag='{}'".format(engine_class, extra_params.get("tag", "")),
          "--{}.tag='{}'".format(controller_class, extra_params.get("tag", "")),
-         "--{}.executable='{}'".format(engine_class, extra_params.get("executable", "")),
-         "--{}.executable='{}'".format(controller_class, extra_params.get("executable", "")),
+         "--{}.executable='{}'".format(engine_class, extra_params.get("executable", "").replace('$', '@')),
+         "--{}.executable='{}'".format(controller_class, extra_params.get("executable", "").replace('$', '@')),
          "--IPClusterStart.controller_launcher_class={}.{}".format(
              ns, controller_class
          ),
