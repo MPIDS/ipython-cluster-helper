@@ -14,4 +14,7 @@ setup(name = "ipython-cluster-helper",
       install_requires = [
           "pyzmq >= 2.1.11",
           "ipython >= 1.1.0",
-          "netifaces >= 0.10.3"])
+          "netifaces >= 0.10.3",
+          "future >= 0.13.1",
+          "paramiko >= 1.15.1",
+      ])
