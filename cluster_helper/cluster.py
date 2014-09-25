@@ -356,6 +356,7 @@ echo \($SGE_TASK_ID - 1\) \* 0.5 | bc | xargs sleep
 class NLDSGEControllerLauncher(launcher.SGEControllerLauncher):
     batch_file_name = Unicode("sge_controller" + str(uuid.uuid4()))
     queue_template = Unicode('')
+    executable = Unicode('')
     default_template = Unicode('''#$ -S /bin/bash
 #$ -cwd
 #$ -N ipctrl_{cluster_id}
