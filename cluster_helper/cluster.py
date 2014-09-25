@@ -24,6 +24,8 @@ import subprocess
 import time
 from distutils.version import LooseVersion
 import sys
+import tempfile
+from paramiko import SSHClient
 
 from IPython.parallel import Client
 from IPython.parallel.apps import launcher
@@ -126,14 +128,14 @@ target_procs = 10240
 resource_cmds = [
     "import resource",
     "cur_proc, max_proc = resource.getrlimit(resource.RLIMIT_NPROC)",
-    "target_proc = min(max_proc, %s) if max_proc > 0 else %s".format(
+    "target_proc = min(max_proc, {}) if max_proc > 0 else {}".format(
         target_procs, target_procs
     ),
     "resource.setrlimit(" +
     "resource.RLIMIT_NPROC, (max(cur_proc, target_proc), max_proc)" +
     ")",
     "cur_hdls, max_hdls = resource.getrlimit(resource.RLIMIT_NOFILE)",
-    "target_hdls = min(max_hdls, %s) if max_hdls > 0 else %s".format(
+    "target_hdls = min(max_hdls, {}) if max_hdls > 0 else {}".format(
         target_procs, target_procs
     ),
     "resource.setrlimit(" +
@@ -141,20 +143,26 @@ resource_cmds = [
     ")"
 ]
 
-start_cmd = "from IPython.parallel.apps.%s import launch_new_instance"
+start_cmd = "from IPython.parallel.apps.{} import launch_new_instance"
 engine_cmd_argv = [sys.executable, "-E", "-c"] + \
     [
         "; ".join(
-            resource_cmds + [start_cmd % "ipengineapp", "launch_new_instance()"]
-        )
-    ]
-cluster_cmd_argv = [sys.executable, "-E", "-c"] + \
-    [
-        "; ".join(
-            resource_cmds + [
-                start_cmd % "ipclusterapp", "launch_new_instance()"
+            resource_cmds +
+            [
+                start_cmd.format("ipengineapp"),
+                "launch_new_instance()"
             ]
         )
+    ]
+cluster_cmd_argv = ["-E", "-c"] + \
+    [
+        '"' +
+        "; ".join(
+            resource_cmds + [
+                start_cmd.format("ipclusterapp"), "launch_new_instance()"
+            ]
+        )
+        + '"'
     ]
 # controller_cmd_argv = [sys.executable, "-E", "-c"] + \
 #     [
@@ -423,7 +431,7 @@ def _find_parallel_environment(queue):
         raise ValueError(
             "Could not find an SGE environment "
             "configured for parallel execution. "
-            "See %s for SGE setup instructions.".format(
+            "See {} for SGE setup instructions.".format(
                 "https://blogs.oracle.com/templedf/entry/"
                 "configuring_a_new_parallel_environment"
             )
@@ -860,9 +868,9 @@ cd $PBS_O_WORKDIR
 
 def _get_profile_args(profile):
     if os.path.isdir(profile) and os.path.isabs(profile):
-        return ["--profile-dir=%s" % profile]
+        return ["--profile-dir={}".format(profile)]
     else:
-        return ["--profile=%s" % profile]
+        return ["--profile={}".format(profile)]
 
 
 def _scheduler_resources(scheduler, params, queue):
@@ -897,24 +905,24 @@ def _scheduler_resources(scheduler, params, queue):
             else:
                 pass_resources.append(r)
         resources = pass_resources
-        if "pename" not in specials:
-            specials["pename"] = _find_parallel_environment(queue)
+#        if "pename" not in specials:
+#            specials["pename"] = _find_parallel_environment(queue)
     return ";".join(resources), specials
 
 
 def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
-           extra_params):
+           extra_params, executable, ssh_client=None):
     """Starts cluster from commandline.
     """
     ns = "cluster_helper.cluster"
     scheduler = scheduler.upper()
     if scheduler == "SLURM" and _slurm_is_old():
         scheduler = "OLDSLURM"
-    engine_class = "Bcbio%sEngineSetLauncher" % scheduler
-    controller_class = "Bcbio%sControllerLauncher" % scheduler
+    engine_class = "Bcbio{}EngineSetLauncher".format(scheduler)
+    controller_class = "Bcbio{}ControllerLauncher".format(scheduler)
     if not (engine_class in globals() and controller_class in globals()):
         print(
-            "The engine and controller class %s and %s are not "
+            "The engine and controller class {} and {} are not "
             "defined. ".format(engine_class, controller_class)
         )
         print(
@@ -936,82 +944,107 @@ def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
             mincores = int(math.ceil(old_div(mincores, float(cores_per_job))))
             num_jobs = int(math.ceil(old_div(num_jobs, float(mincores))))
 
-    args = cluster_cmd_argv + \
+    args = [executable, ] + cluster_cmd_argv + \
         ["start",
          "--daemonize=True",
          "--IPClusterEngines.early_shutdown=240",
          "--delay=10",
          "--log-to-file",
          "--debug",
-         "--n=%s" % num_jobs,
-         "--%s.cores=%s" % (controller_class, min(mincores, 2)),
-         "--%s.cores=%s" % (engine_class, cores_per_job),
-         "--%s.resources='%s'" % (controller_class, resources),
-         "--%s.resources='%s'" % (engine_class, resources),
-         "--%s.mem='%s'" % (engine_class, extra_params.get("mem", "")),
-         "--%s.mem='%s'" % (controller_class, extra_params.get("mem", "")),
-         "--%s.tag='%s'" % (engine_class, extra_params.get("tag", "")),
-         "--%s.tag='%s'" % (controller_class, extra_params.get("tag", "")),
-         "--IPClusterStart.controller_launcher_class=%s.%s".format(
+         "--n={}".format(num_jobs),
+         "--{}.cores={}".format(controller_class, min(mincores, 2)),
+         "--{}.cores={}".format(engine_class, cores_per_job),
+         "--{}.resources='{}'".format(controller_class, resources),
+         "--{}.resources='{}'".format(engine_class, resources),
+         "--{}.mem='{}'".format(engine_class, extra_params.get("mem", "")),
+         "--{}.mem='{}'".format(controller_class, extra_params.get("mem", "")),
+         "--{}.tag='{}'".format(engine_class, extra_params.get("tag", "")),
+         "--{}.tag='{}'".format(controller_class, extra_params.get("tag", "")),
+         "--IPClusterStart.controller_launcher_class={}.{}".format(
              ns, controller_class
          ),
-         "--IPClusterStart.engine_launcher_class=%s.%s" % (ns, engine_class),
-         "--%sLauncher.queue='%s'" % (scheduler, queue),
-         "--cluster-id=%s" % (cluster_id)
+         "--IPClusterStart.engine_launcher_class={}.{}".format(
+             ns, engine_class
+         ),
+         "--{}Launcher.queue='{}'".format(scheduler, queue),
+         "--cluster-id={}".format(cluster_id),
          ]
     args += _get_profile_args(profile)
     if mincores > 1 and mincores > cores_per_job:
-        args += ["--%s.numengines=%s" % (engine_class, mincores)]
+        args += ["--{}.numengines={}".format(engine_class, mincores)]
     if specials.get("pename"):
-        args += ["--%s.pename=%s" % (controller_class, specials["pename"])]
-        args += ["--%s.pename=%s" % (engine_class, specials["pename"])]
+        args += ["--{}.pename={}".format(controller_class, specials["pename"])]
+        args += ["--{}.pename={}".format(engine_class, specials["pename"])]
     if specials.get("memtype"):
-        args += ["--%s.memtype=%s" % (engine_class, specials["memtype"])]
+        args += ["--{}.memtype={}".format(engine_class, specials["memtype"])]
     if slurm_atrs:
-        args += ["--%s.machines=%s".format(
+        args += ["--{}.machines={}".format(
             engine_class, slurm_atrs.get("machines", "0")
         )]
-        args += ["--%s.account=%s" % (engine_class, slurm_atrs["account"])]
-        args += ["--%s.account=%s" % (controller_class, slurm_atrs["account"])]
-        args += ["--%s.timelimit='%s'".format(
+        args += ["--{}.account={}".format(engine_class, slurm_atrs["account"])]
+        args += ["--{}.account={}".format(
+            controller_class, slurm_atrs["account"])
+        ]
+        args += ["--{}.timelimit='{}'".format(
             engine_class, slurm_atrs["timelimit"]
         )]
-        args += ["--%s.timelimit='%s'".format(
+        args += ["--{}.timelimit='{}'".format(
             controller_class, slurm_atrs["timelimit"]
         )]
-    subprocess.check_call(args)
+
+    if ssh_client is None:
+        subprocess.check_call(args)
+    else:
+        ssh_client.exec_command(
+            'source ~/.profile; ' + ' '.join(args)
+        )
+
     return cluster_id
 
 
 def _start_local(cores, profile, cluster_id):
     """Start a local non-distributed IPython engine. Useful for testing
     """
-    args = cluster_cmd_argv + \
-        ["start",
-         "--daemonize=True",
-         "--log-to-file",
-         "--debug",
-         "--cluster-id=%s" % cluster_id,
-         "--n=%s" % cores]
+    args = [sys.executable, ] + cluster_cmd_argv + [
+        "start",
+        "--daemonize=True",
+        "--log-to-file",
+        "--debug",
+        "--cluster-id={}".format(cluster_id),
+        "--n={}".format(cores)
+    ]
     args += _get_profile_args(profile)
     subprocess.check_call(args)
     return cluster_id
 
 
-def stop_from_view(view):
-    _stop(view.clusterhelper["profile"], view.clusterhelper["cluster_id"])
+# def stop_from_view(view):
+#     _stop(view.clusterhelper["profile"], view.clusterhelper["cluster_id"])
 
 
-def _stop(profile, cluster_id):
-    args = cluster_cmd_argv + \
-        ["stop", "--cluster-id=%s" % cluster_id]
+def _stop(profile, cluster_id, executable, ssh_client=None):
+    args = [executable, ] + cluster_cmd_argv + [
+        "stop",
+        "--cluster-id={}".format(cluster_id)
+    ]
     args += _get_profile_args(profile)
-    subprocess.check_call(args)
+
+    if ssh_client is None:
+        subprocess.check_call(args)
+    else:
+        ssh_client.exec_command(
+            'source ~/.profile; ' + ' '.join(args)
+        )
 
 
 @contextlib.contextmanager
-def cluster_view(scheduler, queue, num_jobs, cores_per_job=1, profile=None,
-                 start_wait=16, extra_params=None, retries=None, direct=False):
+def cluster_view(
+    queue, num_jobs,
+    sshhostname=None, sshuser=None, sshport=22, sshkey=None, sshpassword=None,
+    executable=sys.executable,
+    scheduler='sge', cores_per_job=1, profile=None,
+    start_wait=16, extra_params=None, retries=None, direct=False
+):
     """Provide a view on an ipython cluster for processing.
 
       - scheduler: The type of cluster to start (lsf, sge, pbs, torque).
@@ -1020,7 +1053,27 @@ def cluster_view(scheduler, queue, num_jobs, cores_per_job=1, profile=None,
       - start_wait: How long to wait for the cluster to startup, in minutes.
         Defaults to 16 minutes. Set to longer for slow starting clusters.
       - retries: Number of retries to allow for failed tasks.
+
+      - ssh_client: A connected paramiko.client.SSHClient instance
+      - executable: the path to the executable
     """
+
+    if sshhostname is not None:
+        sshserver = sshhostname
+        if sshuser is not None:
+            sshserver = "{}@{}".format(sshuser, sshhostname)
+        if sshport is not None:
+            sshserver = "{}:{}".format(sshserver, sshport)
+
+        ssh_client = SSHClient()
+        ssh_client.load_system_host_keys()
+        ssh_client.connect(
+            hostname=sshhostname,
+            port=sshport,
+            username=sshuser,
+            key_filename=sshkey,
+        )
+
     num_jobs = int(num_jobs)
     cores_per_job = int(cores_per_job)
     start_wait = int(start_wait)
@@ -1030,21 +1083,30 @@ def cluster_view(scheduler, queue, num_jobs, cores_per_job=1, profile=None,
     max_delay = start_wait * 60
     delay = 5 if extra_params.get("run_local") else 30
     max_tries = 10
+
     if profile is None:
         has_throwaway = True
-        profile = create_throwaway_profile()
+        profile = create_throwaway_profile(executable, ssh_client)
     else:
         # ensure we have an .ipython directory to prevent issues
         # creating it during parallel startup
         cmd = [sys.executable, "-E", "-c",
                "from IPython import start_ipython; start_ipython()",
                "profile", "create", "--parallel"] + _get_profile_args(profile)
-        subprocess.check_call(cmd)
+        if ssh_client is None:
+            subprocess.check_call(cmd)
+        else:
+            remote_cmd = ' '.join([
+                '"{}"'.format(item) if ' ' in item else item
+                for item in cmd
+            ])
+            ssh_client.exec_command(
+                'source ~/.profile; ' + remote_cmd
+            )
         has_throwaway = False
     num_tries = 0
 
     cluster_id = str(uuid.uuid4())
-    url_file = get_url_file(profile, cluster_id)
 
     while 1:
         try:
@@ -1053,7 +1115,8 @@ def cluster_view(scheduler, queue, num_jobs, cores_per_job=1, profile=None,
             else:
                 _start(
                     scheduler, profile, queue, num_jobs,
-                    cores_per_job, cluster_id, extra_params
+                    cores_per_job, cluster_id, extra_params,
+                    executable, ssh_client
                 )
             break
         except subprocess.CalledProcessError:
@@ -1061,27 +1124,39 @@ def cluster_view(scheduler, queue, num_jobs, cores_per_job=1, profile=None,
                 raise
             num_tries += 1
             time.sleep(delay)
+
     try:
+        url_file, profile_dir = get_url_file(
+            profile, cluster_id, executable,
+            ssh_client=ssh_client, timeout=start_wait * 60
+        )
+
         need_engines = 1  # Start using cluster when this many engines are up
         client = None
         slept = 0
         max_up = 0
         up = 0
         while up < need_engines:
-            up = _nengines_up(url_file)
+            up = _nengines_up(
+                url_file,
+                sshserver=sshserver, sshkey=sshkey, sshpassword=sshpassword
+            )
             if up < max_up:
                 print(
                     "Engine(s) that were up have shutdown prematurely. "
                     "Aborting cluster startup."
                 )
-                _stop(profile, cluster_id)
+                _stop(profile, cluster_id, executable, ssh_client)
                 sys.exit(1)
             max_up = up
             time.sleep(delay)
             slept += delay
             if slept > max_delay:
                 raise IOError("Cluster startup timed out.")
-        client = Client(url_file, timeout=60)
+        client = Client(
+            url_file, timeout=60,
+            sshserver=sshserver, sshkey=sshkey, sshpassword=sshpassword
+        )
         if direct:
             view = _get_direct_view(client, retries)
         else:
@@ -1094,16 +1169,19 @@ def cluster_view(scheduler, queue, num_jobs, cores_per_job=1, profile=None,
     finally:
         if client:
             _shutdown(client)
-        _stop(profile, cluster_id)
+        _stop(profile, cluster_id, executable, ssh_client)
         if has_throwaway:
-            delete_profile(profile)
+            delete_profile(profile_dir, ssh_client)
 
 
-def _nengines_up(url_file):
+def _nengines_up(url_file, sshserver=None, sshkey=None, sshpassword=None):
     "return the number of engines up"
     client = None
     try:
-        client = Client(url_file, timeout=60)
+        client = Client(
+            url_file, timeout=60,
+            sshserver=sshserver, sshkey=sshkey, sshpassword=sshpassword
+        )
         up = len(client.ids)
         client.close()
     # the controller isn't up yet
@@ -1152,42 +1230,111 @@ def _slurm_version():
 
 
 # ## Temporary profile management
-def create_throwaway_profile():
+def create_throwaway_profile(executable, ssh_client=None):
     profile = str(uuid.uuid1())
     cmd = [
-        sys.executable, "-E", "-c",
+        executable, "-E", "-c",
         "from IPython import start_ipython; start_ipython()",
         "profile", "create", profile, "--parallel"
     ]
-    subprocess.check_call(cmd)
+    if ssh_client is None:
+        subprocess.check_call(cmd)
+    else:
+        remote_cmd = ' '.join([
+            '"{}"'.format(item) if ' ' in item else item
+            for item in cmd
+        ])
+        ssh_client.exec_command(
+            'source ~/.profile; ' + remote_cmd
+        )
+
     return profile
 
 
-def get_url_file(profile, cluster_id):
+def get_url_file(profile, cluster_id, executable, ssh_client=None, timeout=60):
 
     url_file = "ipcontroller-{0}-client.json".format(cluster_id)
 
-    if os.path.isdir(profile) and os.path.isabs(profile):
-        # Return full_path if one is given
-        return os.path.join(profile, "security", url_file)
+    if ssh_client is None:
+        if os.path.isdir(profile) and os.path.isabs(profile):
+            # Return full_path if one is given
+            return os.path.join(profile, "security", url_file), profile
 
-    return os.path.join(locate_profile(profile), "security", url_file)
+        profile_dir = locate_profile(profile)
+        return (
+            os.path.join(locate_profile(profile), "security", url_file),
+            profile_dir
+        )
+
+    remote_cmd = (
+        '{0} -E -c '
+        '"from IPython.utils.path import locate_profile; '
+        'print(locate_profile(\'{1}\'))"'
+    ).format(executable, profile)
+
+    remote_profile_dir = ssh_client.exec_command(
+        'source ~/.profile > \dev\null; ' + remote_cmd
+    )[1].read().decode('utf-8').strip()
+
+    remote_url_file = os.path.join(
+        remote_profile_dir, "security", url_file
+    )
+
+    # copy connection file
+    f = tempfile.NamedTemporaryFile(delete=False)
+    sftp = ssh_client.open_sftp()
+
+    slept = 0
+    while 1:
+        try:
+            sftp.getfo(remote_url_file, f)
+        except FileNotFoundError:
+            time.sleep(1)
+            slept += 1
+            if slept > timeout:
+                # timeout
+                raise IOError(
+                    "Connection file not found. Cluster startup timed out."
+                )
+        else:
+            break
+
+    local_file = f.name
+    f.close()
+
+    return os.path.join(local_file), remote_profile_dir
 
 
-def delete_profile(profile):
+def delete_profile(profile_dir, ssh_client=None):
     MAX_TRIES = 10
-    dir_to_remove = locate_profile(profile)
-    if os.path.exists(dir_to_remove):
-        num_tries = 0
-        while True:
-            try:
-                shutil.rmtree(dir_to_remove)
-                break
-            except OSError:
-                if num_tries > MAX_TRIES:
-                    raise
-                time.sleep(5)
-                num_tries += 1
+    dir_to_remove = profile_dir
+
+    # safety first
+    if not dir_to_remove:
+        return
+
+    if '*' in dir_to_remove:
+        return
+
+    if ssh_client is None:
+        if os.path.exists(dir_to_remove):
+            num_tries = 0
+            while True:
+                try:
+                    shutil.rmtree(dir_to_remove)
+                    break
+                except OSError:
+                    if num_tries > MAX_TRIES:
+                        raise
+                    time.sleep(5)
+                    num_tries += 1
+        else:
+            raise ValueError("Cannot find {0} to remove, "
+                            "something is wrong.".format(dir_to_remove))
     else:
-        raise ValueError("Cannot find {0} to remove, "
-                         "something is wrong.".format(dir_to_remove))
+        ssh_client.exec_command(
+            'test -e {0} && rm -rf {1}'.format(
+                os.path.join(profile_dir, 'ipython_config.py'),
+                profile_dir
+            )
+        )
