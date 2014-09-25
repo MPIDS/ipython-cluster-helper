@@ -1,3 +1,4 @@
+from __future__ import print_function
 import os
 import subprocess
 import fnmatch
@@ -139,5 +140,5 @@ def per_core_reservation():
     return False
 
 if __name__ == "__main__":
-    print get_lsf_units()
-    print per_core_reservation()
+    print(get_lsf_units())
+    print(per_core_reservation())

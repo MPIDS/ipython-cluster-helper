@@ -6,6 +6,8 @@ http://ipython.org/ipython-doc/stable/parallel/index.html
 Borrowed from Brad Chapman's implementation:
 https://github.com/chapmanb/bcbio-nextgen/blob/master/bcbio/distributed/ipython.py
 """
+from __future__ import print_function
+from __future__ import absolute_import
 import contextlib
 import copy
 import math
@@ -26,9 +28,9 @@ from IPython.utils import pickleutil
 from IPython.utils import traitlets
 from IPython.utils.traitlets import (List, Unicode, CRegExp)
 
-from slurm import get_slurm_attributes
-import utils
-import lsf
+from .slurm import get_slurm_attributes
+from . import utils
+from . import lsf
 
 # Dill not working for complex serialization
 #try:
@@ -952,7 +954,7 @@ def _get_balanced_blocked_view(client, retries):
     return view
 
 def _shutdown(client):
-    print "Sending a shutdown signal to the controller and engines."
+    print("Sending a shutdown signal to the controller and engines.")
     client.close()
 
 def _get_direct_view(client, retries):
