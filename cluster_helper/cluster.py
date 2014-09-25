@@ -38,10 +38,10 @@ from . import utils
 from . import lsf
 
 # Dill not working for complex serialization
-#try:
-#    import dill
-#except ImportError:
-#    dill = None
+# try:
+#     import dill
+# except ImportError:
+#     dill = None
 dill = None
 
 DEFAULT_MEM_PER_CPU = 1000  # Mb
@@ -70,19 +70,22 @@ import netifaces
 from IPython.parallel.apps.ipcontrollerapp import IPControllerApp
 from IPython.utils.data import uniq_stable
 
+
 class VMFixIPControllerApp(IPControllerApp):
     def _get_public_ip(self):
         """Avoid picking up docker and VM network interfaces in IPython 2.0.
 
         Adjusts _load_ips_netifaces from IPython.utils.localinterfaces. Changes
-        submitted upstream so we can remove this when incorporated into released IPython.
+        submitted upstream so we can remove this when incorporated into released
+        IPython.
 
         Prioritizes a set of common interfaces to try and make better decisions
         when choosing from multiple choices.
         """
         standard_ips = []
         priority_ips = []
-        vm_ifaces = set(["docker0", "virbr0", "lxcbr0"])  # VM/container interfaces we do not want
+        # VM/container interfaces we do not want
+        vm_ifaces = set(["docker0", "virbr0", "lxcbr0"])
         priority_ifaces = ("eth",)  # Interfaces we prefer to get IPs from
 
         # list of iface names, 'lo0', 'eth0', etc.
@@ -120,24 +123,57 @@ class VMFixIPControllerApp(IPControllerApp):
 # within available hard limits.
 # Match target_procs to OSX limits for a default.
 target_procs = 10240
-resource_cmds = ["import resource",
-                 "cur_proc, max_proc = resource.getrlimit(resource.RLIMIT_NPROC)",
-                 "target_proc = min(max_proc, %s) if max_proc > 0 else %s" % (target_procs, target_procs),
-                 "resource.setrlimit(resource.RLIMIT_NPROC, (max(cur_proc, target_proc), max_proc))",
-                 "cur_hdls, max_hdls = resource.getrlimit(resource.RLIMIT_NOFILE)",
-                 "target_hdls = min(max_hdls, %s) if max_hdls > 0 else %s" % (target_procs, target_procs),
-                 "resource.setrlimit(resource.RLIMIT_NOFILE, (max(cur_hdls, target_hdls), max_hdls))"]
+resource_cmds = [
+    "import resource",
+    "cur_proc, max_proc = resource.getrlimit(resource.RLIMIT_NPROC)",
+    "target_proc = min(max_proc, %s) if max_proc > 0 else %s".format(
+        target_procs, target_procs
+    ),
+    "resource.setrlimit(" +
+    "resource.RLIMIT_NPROC, (max(cur_proc, target_proc), max_proc)" +
+    ")",
+    "cur_hdls, max_hdls = resource.getrlimit(resource.RLIMIT_NOFILE)",
+    "target_hdls = min(max_hdls, %s) if max_hdls > 0 else %s".format(
+        target_procs, target_procs
+    ),
+    "resource.setrlimit(" +
+    "resource.RLIMIT_NOFILE, (max(cur_hdls, target_hdls), max_hdls)" +
+    ")"
+]
 
 start_cmd = "from IPython.parallel.apps.%s import launch_new_instance"
 engine_cmd_argv = [sys.executable, "-E", "-c"] + \
-                  ["; ".join(resource_cmds + [start_cmd % "ipengineapp", "launch_new_instance()"])]
+    [
+        "; ".join(
+            resource_cmds + [start_cmd % "ipengineapp", "launch_new_instance()"]
+        )
+    ]
 cluster_cmd_argv = [sys.executable, "-E", "-c"] + \
-                   ["; ".join(resource_cmds + [start_cmd % "ipclusterapp", "launch_new_instance()"])]
-#controller_cmd_argv = [sys.executable, "-E", "-c"] + \
-#                      ["; ".join(resource_cmds + [start_cmd % "ipcontrollerapp", "launch_new_instance()"])]
+    [
+        "; ".join(
+            resource_cmds + [
+                start_cmd % "ipclusterapp", "launch_new_instance()"
+            ]
+        )
+    ]
+# controller_cmd_argv = [sys.executable, "-E", "-c"] + \
+#     [
+#         "; ".join(
+#             resource_cmds + [
+#                 start_cmd % "ipcontrollerapp", "launch_new_instance()"
+#             ]
+#         )
+#     ]
 controller_cmd_argv = [sys.executable, "-E", "-c"] + \
-                      ["; ".join(resource_cmds + ["from cluster_helper.cluster import VMFixIPControllerApp",
-                                                  "VMFixIPControllerApp.launch_instance()"])]
+    [
+        "; ".join(
+            resource_cmds + [
+                "from cluster_helper.cluster import VMFixIPControllerApp",
+                "VMFixIPControllerApp.launch_instance()"
+            ]
+        )
+    ]
+
 
 def get_engine_commands(context, n):
     """Retrieve potentially multiple engines running in a single submit script.
@@ -145,12 +181,17 @@ def get_engine_commands(context, n):
     Need to background the initial processes if multiple run.
     """
     assert n > 0
-    engine_cmd_full = '%s %s --profile-dir="{profile_dir}" --cluster-id="{cluster_id}"' % \
-                      (' '.join(map(pipes.quote, engine_cmd_argv)), ' '.join(timeout_params))
+    engine_cmd_full = (
+        '%s %s --profile-dir="{profile_dir}" '
+        '--cluster-id="{cluster_id}"'
+    ).format(
+        ' '.join(map(pipes.quote, engine_cmd_argv)), ' '.join(timeout_params)
+    )
     out = [engine_cmd_full.format(**context)]
     for _ in range(n - 1):
         out.insert(0, "(%s &) &&" % (engine_cmd_full.format(**context)))
     return "\n".join(out)
+
 
 # ## Platform LSF
 class BcbioLSFEngineSetLauncher(launcher.LSFEngineSetLauncher):
@@ -193,6 +234,7 @@ class BcbioLSFEngineSetLauncher(launcher.LSFEngineSetLauncher):
         self.context["cmd"] = get_engine_commands(self.context, self.numengines)
         return super(BcbioLSFEngineSetLauncher, self).start(n)
 
+
 def _format_lsf_resources(resources):
     resource_str = ""
     for r in str(resources).split(";"):
@@ -206,6 +248,7 @@ def _format_lsf_resources(resources):
                 val = ""
             resource_str += "#BSUB -%s %s\n" % (arg, val)
     return resource_str
+
 
 class BcbioLSFControllerLauncher(launcher.LSFControllerLauncher):
     batch_file_name = Unicode(str("lsf_controller" + str(uuid.uuid4())))
@@ -223,13 +266,16 @@ class BcbioLSFControllerLauncher(launcher.LSFControllerLauncher):
 %s --ip=* --log-to-file --profile-dir="{profile_dir}" --cluster-id="{cluster_id}" %s
     """ % (' '.join(map(pipes.quote, controller_cmd_argv)),
            ' '.join(controller_params)))
+
     def start(self):
         self.context["cores"] = self.cores
         self.context["tag"] = self.tag if self.tag else "bcbio"
         self.context["resources"] = _format_lsf_resources(self.resources)
         return super(BcbioLSFControllerLauncher, self).start()
 
+
 # ## Sun Grid Engine (SGE)
+
 
 def _local_environment_exports():
     """Create export string for a batch script with environmental variables to pass.
@@ -243,6 +289,7 @@ def _local_environment_exports():
         if envval:
             exports.append("export %s=%s" % (envname, envval))
     return "\n".join(exports)
+
 
 class BcbioSGEEngineSetLauncher(launcher.SGEEngineSetLauncher):
     """Custom launcher handling heterogeneous clusters on SGE.
@@ -276,9 +323,13 @@ echo \($SGE_TASK_ID - 1\) \* 0.5 | bc | xargs sleep
         self.context["cores"] = self.cores
         if self.mem:
             if self.memtype == "rss":
-                self.context["mem"] = "#$ -l rss=%sM" % int(float(self.mem) * 1024 / self.cores)
+                self.context["mem"] = "#$ -l rss=%sM".format(
+                    int(float(self.mem) * 1024 / self.cores)
+                )
             else:
-                self.context["mem"] = "#$ -l mem_free=%sM" % int(float(self.mem) * 1024)
+                self.context["mem"] = "#$ -l mem_free=%sM".format(
+                    int(float(self.mem) * 1024)
+                )
         else:
             self.context["mem"] = ""
         if self.queue:
@@ -287,11 +338,14 @@ echo \($SGE_TASK_ID - 1\) \* 0.5 | bc | xargs sleep
             self.context["queue"] = ""
         self.context["tag"] = self.tag if self.tag else "bcbio"
         self.context["pename"] = str(self.pename)
-        self.context["resources"] = "\n".join([_prep_sge_resource(r)
-                                               for r in str(self.resources).split(";")
-                                               if r.strip()])
+        self.context["resources"] = "\n".join([
+            _prep_sge_resource(r)
+            for r in str(self.resources).split(";")
+            if r.strip()
+        ])
         self.context["exports"] = _local_environment_exports()
         return super(BcbioSGEEngineSetLauncher, self).start(n)
+
 
 class BcbioSGEControllerLauncher(launcher.SGEControllerLauncher):
     batch_file_name = Unicode(str("sge_controller" + str(uuid.uuid4())))
@@ -312,12 +366,17 @@ class BcbioSGEControllerLauncher(launcher.SGEControllerLauncher):
 %s --ip=* --log-to-file --profile-dir="{profile_dir}" --cluster-id="{cluster_id}" %s
 """ % (' '.join(map(pipes.quote, controller_cmd_argv)),
        ' '.join(controller_params)))
+
     def start(self):
-        self.context["cores"] = "#$ -pe %s %s" % (self.pename, self.cores) if self.cores > 1 else ""
+        self.context["cores"] = "#$ -pe %s %s".format(
+            self.pename, self.cores
+        ) if self.cores > 1 else ""
         self.context["tag"] = self.tag if self.tag else "bcbio"
-        self.context["resources"] = "\n".join([_prep_sge_resource(r)
-                                               for r in str(self.resources).split(";")
-                                               if r.strip()])
+        self.context["resources"] = "\n".join([
+            _prep_sge_resource(r)
+            for r in str(self.resources).split(";")
+            if r.strip()
+        ])
         if self.queue:
             self.context["queue"] = "#$ -q %s" % self.queue
         else:
@@ -325,8 +384,11 @@ class BcbioSGEControllerLauncher(launcher.SGEControllerLauncher):
         self.context["exports"] = _local_environment_exports()
         return super(BcbioSGEControllerLauncher, self).start()
 
+
 def _prep_sge_resource(resource):
-    """Prepare SGE resource specifications from the command line handling special cases.
+    """
+    Prepare SGE resource specifications from the command line handling special
+    cases.
     """
     resource = resource.strip()
     k, v = resource.split("=")
@@ -335,8 +397,11 @@ def _prep_sge_resource(resource):
     else:
         return "#$ -l %s" % resource
 
+
 def _find_parallel_environment(queue):
-    """Find an SGE/OGE parallel environment for running multicore jobs in specified queue.
+    """
+    Find an SGE/OGE parallel environment for running multicore jobs in specified
+    queue.
     """
     base_queue = os.path.splitext(queue)[0]
     queue = base_queue + ".q"
@@ -344,22 +409,34 @@ def _find_parallel_environment(queue):
     available_pes = []
     for name in subprocess.check_output(["qconf", "-spl"]).strip().split():
         if name:
-            for line in subprocess.check_output(["qconf", "-sp", name]).split("\n"):
+            for line in subprocess.check_output(
+                    ["qconf", "-sp", name]
+            ).split("\n"):
                 if _has_parallel_environment(line):
-                    if (_queue_can_access_pe(name, queue) or _queue_can_access_pe(name, base_queue)):
+                    if (
+                        _queue_can_access_pe(name, queue)
+                        or
+                        _queue_can_access_pe(name, base_queue)
+                    ):
                         available_pes.append(name)
     if len(available_pes) == 0:
-        raise ValueError("Could not find an SGE environment configured for parallel execution. "
-                         "See %s for SGE setup instructions." %
-                         "https://blogs.oracle.com/templedf/entry/configuring_a_new_parallel_environment")
+        raise ValueError(
+            "Could not find an SGE environment "
+            "configured for parallel execution. "
+            "See %s for SGE setup instructions.".format(
+                "https://blogs.oracle.com/templedf/entry/"
+                "configuring_a_new_parallel_environment"
+            )
+        )
     else:
         return _prioritize_pes(available_pes)
+
 
 def _prioritize_pes(choices):
     """Prioritize and deprioritize paired environments based on names.
 
-    We're looking for multiprocessing friendly environments, so prioritize ones with SMP
-    in the name and deprioritize those with MPI.
+    We're looking for multiprocessing friendly environments, so prioritize ones
+    with SMP in the name and deprioritize those with MPI.
     """
     # lower scores = better
     ranks = {"smp": -1, "mpi": 1}
@@ -376,6 +453,7 @@ def _prioritize_pes(choices):
             sort_choices.append((0, n))
     sort_choices.sort()
     return sort_choices[0][1]
+
 
 def _parseSGEConf(data):
     """Handle SGE multiple line output nastiness.
@@ -398,11 +476,14 @@ def _parseSGEConf(data):
             multiline = (line[-1] == '\\')
     return ret
 
+
 def _queue_can_access_pe(pe_name, queue):
     """Check if a queue has access to a specific parallel environment, using qconf.
     """
     try:
-        queue_config = _parseSGEConf(subprocess.check_output(["qconf", "-sq", queue]))
+        queue_config = _parseSGEConf(
+            subprocess.check_output(["qconf", "-sq", queue])
+        )
     except:
         return False
     for test_pe_name in queue_config["pe_list"].split():
@@ -411,11 +492,13 @@ def _queue_can_access_pe(pe_name, queue):
             return True
     return False
 
+
 def _has_parallel_environment(line):
     if line.startswith("allocation_rule"):
         if line.find("$pe_slots") >= 0 or line.find("$fill_up") >= 0:
                 return True
     return False
+
 
 # ## SLURM
 class SLURMLauncher(launcher.BatchSystemLauncher):
@@ -427,11 +510,19 @@ class SLURMLauncher(launcher.BatchSystemLauncher):
     # "FINISHED"
     delete_command = List(['scancel', '--signal=KILL'], config=True,
                           help="The SLURM delete command ['scancel']")
-    job_id_regexp = CRegExp(r'\d+', config=True,
-                            help="A regular expression used to get the job id from the output of 'sbatch'")
+    job_id_regexp = CRegExp(
+        r'\d+',
+        config=True,
+        help=(
+            "A regular expression used to get the "
+            "job id from the output of 'sbatch'"
+        )
+    )
 
-    batch_file = Unicode(u'', config=True,
-                         help="The string that is the batch script template itself.")
+    batch_file = Unicode(
+        u'', config=True,
+        help="The string that is the batch script template itself."
+    )
 
     queue_regexp = CRegExp('#SBATCH\W+-p\W+\w')
     queue_template = Unicode('#SBATCH -p {queue}')
@@ -467,20 +558,31 @@ class BcbioSLURMEngineSetLauncher(SLURMLauncher, launcher.BatchClusterAppMixin):
     def start(self, n):
         self.context["cores"] = self.cores * self.numengines
         if self.mem:
-            self.context["mem"] = "#SBATCH --mem=%s" % int(float(self.mem) * 1024.0 * self.numengines)
+            self.context["mem"] = "#SBATCH --mem=%s".format(
+                int(float(self.mem) * 1024.0 * self.numengines)
+            )
         else:
-            self.context["mem"] = "#SBATCH --mem=%d" % int(DEFAULT_MEM_PER_CPU * self.cores * self.numengines)
+            self.context["mem"] = "#SBATCH --mem=%d".format(
+                int(DEFAULT_MEM_PER_CPU * self.cores * self.numengines)
+            )
         self.context["tag"] = self.tag if self.tag else "bcbio"
-        self.context["machines"] = ("#SBATCH %s" % (self.machines) if int(self.machines) > 0 else "")
+        self.context["machines"] = (
+            "#SBATCH %s" % (self.machines) if int(self.machines) > 0 else ""
+        )
         self.context["account"] = self.account
         self.context["timelimit"] = self.timelimit
-        self.context["resources"] = "\n".join(["#SBATCH --%s" % r.strip()
-                                               for r in str(self.resources).split(";")
-                                               if r.strip()])
+        self.context["resources"] = "\n".join([
+            "#SBATCH --%s" % r.strip()
+            for r in str(self.resources).split(";")
+            if r.strip()
+        ])
         self.context["cmd"] = get_engine_commands(self.context, self.numengines)
         return super(BcbioSLURMEngineSetLauncher, self).start(n)
 
-class BcbioSLURMControllerLauncher(SLURMLauncher, launcher.BatchClusterAppMixin):
+
+class BcbioSLURMControllerLauncher(
+    SLURMLauncher, launcher.BatchClusterAppMixin
+):
     batch_file_name = Unicode(str("SLURM_controller" + str(uuid.uuid4())))
     account = traitlets.Unicode("", config=True)
     cores = traitlets.Integer(1, config=True)
@@ -500,25 +602,32 @@ class BcbioSLURMControllerLauncher(SLURMLauncher, launcher.BatchClusterAppMixin)
 %s --ip=* --log-to-file --profile-dir="{profile_dir}" --cluster-id="{cluster_id}" %s
 """ % (' '.join(map(pipes.quote, controller_cmd_argv)),
        ' '.join(controller_params)))
+
     def start(self):
         self.context["account"] = self.account
         self.context["timelimit"] = self.timelimit
         self.context["cores"] = self.cores
         self.context["mem"] = "#SBATCH --mem=%d" % (12 * DEFAULT_MEM_PER_CPU)
         self.context["tag"] = self.tag if self.tag else "bcbio"
-        self.context["resources"] = "\n".join(["#SBATCH --%s" % r.strip()
-                                               for r in str(self.resources).split(";")
-                                               if r.strip()])
+        self.context["resources"] = "\n".join([
+            "#SBATCH --%s" % r.strip()
+            for r in str(self.resources).split(";")
+            if r.strip()
+        ])
         return super(BcbioSLURMControllerLauncher, self).start(1)
 
 
-class BcbioOLDSLURMEngineSetLauncher(SLURMLauncher, launcher.BatchClusterAppMixin):
+class BcbioOLDSLURMEngineSetLauncher(
+    SLURMLauncher, launcher.BatchClusterAppMixin
+):
     """Launch engines using SLURM for version < 2.6"""
     machines = traitlets.Integer(1, config=True)
     account = traitlets.Unicode("", config=True)
     timelimit = traitlets.Unicode("", config=True)
-    batch_file_name = Unicode(str("SLURM_engines" + str(uuid.uuid4())),
-                              config=True, help="batch file name for the engine(s) job.")
+    batch_file_name = Unicode(
+        str("SLURM_engines" + str(uuid.uuid4())),
+        config=True, help="batch file name for the engine(s) job."
+    )
 
     default_template = Unicode(u"""#!/bin/sh
 #SBATCH -A {account}
@@ -537,12 +646,16 @@ srun -N {machines} -n {n} %s %s --profile-dir="{profile_dir}" --cluster-id="{clu
         return super(BcbioOLDSLURMEngineSetLauncher, self).start(n)
 
 
-class BcbioOLDSLURMControllerLauncher(SLURMLauncher, launcher.BatchClusterAppMixin):
+class BcbioOLDSLURMControllerLauncher(
+    SLURMLauncher, launcher.BatchClusterAppMixin
+):
     """Launch a controller using SLURM for versions < 2.6"""
     account = traitlets.Unicode("", config=True)
     timelimit = traitlets.Unicode("", config=True)
-    batch_file_name = Unicode(str("SLURM_controller" + str(uuid.uuid4())),
-                              config=True, help="batch file name for the engine(s) job.")
+    batch_file_name = Unicode(
+        str("SLURM_controller" + str(uuid.uuid4())),
+        config=True, help="batch file name for the engine(s) job."
+    )
 
     default_template = Unicode("""#!/bin/sh
 #SBATCH -A {account}
@@ -558,6 +671,7 @@ class BcbioOLDSLURMControllerLauncher(SLURMLauncher, launcher.BatchClusterAppMix
         self.context["timelimit"] = self.timelimit
         return super(BcbioOLDSLURMControllerLauncher, self).start(1)
 
+
 # ## Torque
 class TORQUELauncher(launcher.BatchSystemLauncher):
     """A BatchSystemLauncher subclass for Torque"""
@@ -566,14 +680,17 @@ class TORQUELauncher(launcher.BatchSystemLauncher):
                           help="The PBS submit command ['qsub']")
     delete_command = List(['qdel'], config=True,
                           help="The PBS delete command ['qsub']")
-    job_id_regexp = CRegExp(r'\d+(\[\])?', config=True,
-                            help="Regular expresion for identifying the job ID [r'\d+']")
+    job_id_regexp = CRegExp(
+        r'\d+(\[\])?', config=True,
+        help="Regular expresion for identifying the job ID [r'\d+']"
+    )
 
     batch_file = Unicode(u'')
-    #job_array_regexp = CRegExp('#PBS\W+-t\W+[\w\d\-\$]+')
-    #job_array_template = Unicode('#PBS -t 1-{n}')
+    # job_array_regexp = CRegExp('#PBS\W+-t\W+[\w\d\-\$]+')
+    # job_array_template = Unicode('#PBS -t 1-{n}')
     queue_regexp = CRegExp('#PBS\W+-q\W+\$?\w+')
     queue_template = Unicode('#PBS -q {queue}')
+
 
 def _prep_torque_resources(resources):
     """Prepare resources passed to torque from input parameters.
@@ -597,14 +714,19 @@ def _prep_torque_resources(resources):
         out.append("#PBS -l walltime=239:00:00")
     return out
 
-class BcbioTORQUEEngineSetLauncher(TORQUELauncher, launcher.BatchClusterAppMixin):
+
+class BcbioTORQUEEngineSetLauncher(
+    TORQUELauncher, launcher.BatchClusterAppMixin
+):
     """Launch Engines using Torque"""
     cores = traitlets.Integer(1, config=True)
     mem = traitlets.Unicode("", config=True)
     tag = traitlets.Unicode("", config=True)
     resources = traitlets.Unicode("", config=True)
-    batch_file_name = Unicode(str("torque_engines" + str(uuid.uuid4())),
-                              config=True, help="batch file name for the engine(s) job.")
+    batch_file_name = Unicode(
+        str("torque_engines" + str(uuid.uuid4())),
+        config=True, help="batch file name for the engine(s) job."
+    )
     default_template = Unicode(u"""#!/bin/sh
 #PBS -V
 #PBS -j oe
@@ -623,19 +745,28 @@ cd $PBS_O_WORKDIR
         try:
             self.context["cores"] = self.cores
             if self.mem:
-                self.context["mem"] = "#PBS -l mem=%smb" % int(float(self.mem) * 1024)
+                self.context["mem"] = "#PBS -l mem=%smb".format(
+                    int(float(self.mem) * 1024)
+                )
             else:
                 self.context["mem"] = ""
             self.context["tag"] = self.tag if self.tag else "bcbio"
-            self.context["resources"] = "\n".join(_prep_torque_resources(self.resources))
+            self.context["resources"] = "\n".join(
+                _prep_torque_resources(self.resources)
+            )
             return super(BcbioTORQUEEngineSetLauncher, self).start(n)
         except:
             self.log.exception("Engine start failed")
 
-class BcbioTORQUEControllerLauncher(TORQUELauncher, launcher.BatchClusterAppMixin):
+
+class BcbioTORQUEControllerLauncher(
+    TORQUELauncher, launcher.BatchClusterAppMixin
+):
     """Launch a controller using Torque."""
-    batch_file_name = Unicode(str("torque_controller" + str(uuid.uuid4())),
-                              config=True, help="batch file name for the engine(s) job.")
+    batch_file_name = Unicode(
+        str("torque_controller" + str(uuid.uuid4())),
+        config=True, help="batch file name for the engine(s) job."
+    )
     cores = traitlets.Integer(1, config=True)
     tag = traitlets.Unicode("", config=True)
     resources = traitlets.Unicode("", config=True)
@@ -655,10 +786,13 @@ cd $PBS_O_WORKDIR
         try:
             self.context["cores"] = self.cores
             self.context["tag"] = self.tag if self.tag else "bcbio"
-            self.context["resources"] = "\n".join(_prep_torque_resources(self.resources))
+            self.context["resources"] = "\n".join(
+                _prep_torque_resources(self.resources)
+            )
             return super(BcbioTORQUEControllerLauncher, self).start(1)
         except:
             self.log.exception("Controller start failed")
+
 
 # ## PBSPro
 class PBSPROLauncher(launcher.PBSLauncher):
@@ -666,7 +800,10 @@ class PBSPROLauncher(launcher.PBSLauncher):
     job_array_regexp = CRegExp('#PBS\W+-J\W+[\w\d\-\$]+')
     job_array_template = Unicode('')
 
-class BcbioPBSPROEngineSetLauncher(PBSPROLauncher, launcher.BatchClusterAppMixin):
+
+class BcbioPBSPROEngineSetLauncher(
+    PBSPROLauncher, launcher.BatchClusterAppMixin
+):
     """Launch Engines using PBSPro"""
     batch_file_name = Unicode(u'pbspro_engines', config=True,
                               help="batch file name for the engine(s) job.")
@@ -696,7 +833,9 @@ cd $PBS_O_WORKDIR
         return super(BcbioPBSPROEngineSetLauncher, self).start(n)
 
 
-class BcbioPBSPROControllerLauncher(PBSPROLauncher, launcher.BatchClusterAppMixin):
+class BcbioPBSPROControllerLauncher(
+    PBSPROLauncher, launcher.BatchClusterAppMixin
+):
     """Launch a controller using PBSPro."""
 
     batch_file_name = Unicode(u'pbspro_controller', config=True,
@@ -724,6 +863,7 @@ def _get_profile_args(profile):
         return ["--profile-dir=%s" % profile]
     else:
         return ["--profile=%s" % profile]
+
 
 def _scheduler_resources(scheduler, params, queue):
     """Retrieve custom resource tweaks for specific schedulers.
@@ -761,6 +901,7 @@ def _scheduler_resources(scheduler, params, queue):
             specials["pename"] = _find_parallel_environment(queue)
     return ";".join(resources), specials
 
+
 def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
            extra_params):
     """Starts cluster from commandline.
@@ -772,11 +913,15 @@ def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
     engine_class = "Bcbio%sEngineSetLauncher" % scheduler
     controller_class = "Bcbio%sControllerLauncher" % scheduler
     if not (engine_class in globals() and controller_class in globals()):
-        print ("The engine and controller class %s and %s are not "
-               "defined. " % (engine_class, controller_class))
-        print ("This may be due to ipython-cluster-helper not supporting "
-               "your scheduler. If it should, please file a bug report at "
-               "http://github.com/roryk/ipython-cluster-helper. Thanks!")
+        print(
+            "The engine and controller class %s and %s are not "
+            "defined. ".format(engine_class, controller_class)
+        )
+        print(
+            "This may be due to ipython-cluster-helper not supporting "
+            "your scheduler. If it should, please file a bug report at "
+            "http://github.com/roryk/ipython-cluster-helper. Thanks!"
+        )
         sys.exit(1)
     resources, specials = _scheduler_resources(scheduler, extra_params, queue)
     if scheduler in ["OLDSLURM", "SLURM"]:
@@ -807,7 +952,9 @@ def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
          "--%s.mem='%s'" % (controller_class, extra_params.get("mem", "")),
          "--%s.tag='%s'" % (engine_class, extra_params.get("tag", "")),
          "--%s.tag='%s'" % (controller_class, extra_params.get("tag", "")),
-         "--IPClusterStart.controller_launcher_class=%s.%s" % (ns, controller_class),
+         "--IPClusterStart.controller_launcher_class=%s.%s".format(
+             ns, controller_class
+         ),
          "--IPClusterStart.engine_launcher_class=%s.%s" % (ns, engine_class),
          "--%sLauncher.queue='%s'" % (scheduler, queue),
          "--cluster-id=%s" % (cluster_id)
@@ -821,13 +968,20 @@ def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
     if specials.get("memtype"):
         args += ["--%s.memtype=%s" % (engine_class, specials["memtype"])]
     if slurm_atrs:
-        args += ["--%s.machines=%s" % (engine_class, slurm_atrs.get("machines", "0"))]
+        args += ["--%s.machines=%s".format(
+            engine_class, slurm_atrs.get("machines", "0")
+        )]
         args += ["--%s.account=%s" % (engine_class, slurm_atrs["account"])]
         args += ["--%s.account=%s" % (controller_class, slurm_atrs["account"])]
-        args += ["--%s.timelimit='%s'" % (engine_class, slurm_atrs["timelimit"])]
-        args += ["--%s.timelimit='%s'" % (controller_class, slurm_atrs["timelimit"])]
+        args += ["--%s.timelimit='%s'".format(
+            engine_class, slurm_atrs["timelimit"]
+        )]
+        args += ["--%s.timelimit='%s'".format(
+            controller_class, slurm_atrs["timelimit"]
+        )]
     subprocess.check_call(args)
     return cluster_id
+
 
 def _start_local(cores, profile, cluster_id):
     """Start a local non-distributed IPython engine. Useful for testing
@@ -843,14 +997,17 @@ def _start_local(cores, profile, cluster_id):
     subprocess.check_call(args)
     return cluster_id
 
+
 def stop_from_view(view):
     _stop(view.clusterhelper["profile"], view.clusterhelper["cluster_id"])
 
+
 def _stop(profile, cluster_id):
     args = cluster_cmd_argv + \
-           ["stop", "--cluster-id=%s" % cluster_id]
+        ["stop", "--cluster-id=%s" % cluster_id]
     args += _get_profile_args(profile)
     subprocess.check_call(args)
+
 
 @contextlib.contextmanager
 def cluster_view(scheduler, queue, num_jobs, cores_per_job=1, profile=None,
@@ -879,7 +1036,8 @@ def cluster_view(scheduler, queue, num_jobs, cores_per_job=1, profile=None,
     else:
         # ensure we have an .ipython directory to prevent issues
         # creating it during parallel startup
-        cmd = [sys.executable, "-E", "-c", "from IPython import start_ipython; start_ipython()",
+        cmd = [sys.executable, "-E", "-c",
+               "from IPython import start_ipython; start_ipython()",
                "profile", "create", "--parallel"] + _get_profile_args(profile)
         subprocess.check_call(cmd)
         has_throwaway = False
@@ -893,7 +1051,10 @@ def cluster_view(scheduler, queue, num_jobs, cores_per_job=1, profile=None,
             if extra_params.get("run_local"):
                 _start_local(num_jobs, profile, cluster_id)
             else:
-                _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id, extra_params)
+                _start(
+                    scheduler, profile, queue, num_jobs,
+                    cores_per_job, cluster_id, extra_params
+                )
             break
         except subprocess.CalledProcessError:
             if num_tries > max_tries:
@@ -909,8 +1070,10 @@ def cluster_view(scheduler, queue, num_jobs, cores_per_job=1, profile=None,
         while up < need_engines:
             up = _nengines_up(url_file)
             if up < max_up:
-                print ("Engine(s) that were up have shutdown prematurely. "
-                       "Aborting cluster startup.")
+                print(
+                    "Engine(s) that were up have shutdown prematurely. "
+                    "Aborting cluster startup."
+                )
                 _stop(profile, cluster_id)
                 sys.exit(1)
             max_up = up
@@ -935,6 +1098,7 @@ def cluster_view(scheduler, queue, num_jobs, cores_per_job=1, profile=None,
         if has_throwaway:
             delete_profile(profile)
 
+
 def _nengines_up(url_file):
     "return the number of engines up"
     client = None
@@ -951,6 +1115,7 @@ def _nengines_up(url_file):
     else:
         return up
 
+
 def _get_balanced_blocked_view(client, retries):
     view = client.load_balanced_view()
     view.set_flags(block=True)
@@ -958,9 +1123,11 @@ def _get_balanced_blocked_view(client, retries):
         view.set_flags(retries=int(retries))
     return view
 
+
 def _shutdown(client):
     print("Sending a shutdown signal to the controller and engines.")
     client.close()
+
 
 def _get_direct_view(client, retries):
     view = client[:]
@@ -969,8 +1136,10 @@ def _get_direct_view(client, retries):
         view.set_flags(retries=int(retries))
     return view
 
+
 def _slurm_is_old():
     return LooseVersion(_slurm_version()) < LooseVersion("2.6")
+
 
 def _slurm_version():
     version_line = subprocess.Popen("sinfo -V", shell=True,
@@ -981,14 +1150,18 @@ def _slurm_version():
     else:
         return "2.6+"
 
-# ## Temporary profile management
 
+# ## Temporary profile management
 def create_throwaway_profile():
     profile = str(uuid.uuid1())
-    cmd = [sys.executable, "-E", "-c", "from IPython import start_ipython; start_ipython()",
-           "profile", "create", profile, "--parallel"]
+    cmd = [
+        sys.executable, "-E", "-c",
+        "from IPython import start_ipython; start_ipython()",
+        "profile", "create", profile, "--parallel"
+    ]
     subprocess.check_call(cmd)
     return profile
+
 
 def get_url_file(profile, cluster_id):
 
@@ -999,6 +1172,7 @@ def get_url_file(profile, cluster_id):
         return os.path.join(profile, "security", url_file)
 
     return os.path.join(locate_profile(profile), "security", url_file)
+
 
 def delete_profile(profile):
     MAX_TRIES = 10
