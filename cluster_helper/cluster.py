@@ -369,11 +369,6 @@ class NLDSGEControllerLauncher(launcher.SGEControllerLauncher):
 
     def start(self):
 
-        self.context["resources"] = "\n".join([
-            _prep_sge_resource(r)
-            for r in str(self.resources).split(";")
-            if r.strip()
-        ])
         if self.queue:
             self.context["queue"] = "#$ -q {}".format(self.queue)
         else:
