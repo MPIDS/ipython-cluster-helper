@@ -1323,12 +1323,25 @@ def _slurm_version():
 
 
 # ## Temporary profile management
-def create_throwaway_profile(executable, ssh_client=None):
+def create_throwaway_profile(
+    executable, ssh_client=None, in_working_dir=False, working_dir=None
+):
     profile = str(uuid.uuid1())
+    if in_working_dir:
+        if working_dir is None:
+            raise ValueError
+
+        profile = os.path.join(
+            working_dir, "profile_{}".format(profile)
+        )
+
     cmd = [
         executable, "-E", "-c",
         "from IPython import start_ipython; start_ipython()",
-        "profile", "create", profile, "--parallel"
+        "profile", "create",
+        profile if not in_working_dir or working_dir is None
+        else "--profile-dir={}".format(profile),
+        "--parallel"
     ]
     if ssh_client is None:
         subprocess.check_call(cmd)
