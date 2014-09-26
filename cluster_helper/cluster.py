@@ -1117,6 +1117,7 @@ def cluster_view(
     queue, num_jobs,
     sshhostname=None, sshuser=None, sshport=22, sshkey=None, sshpassword=None,
     executable=sys.executable,
+    profile_in_work_dir=False,
     cluster='Bcbio', work_dir=None,
     scheduler='sge', cores_per_job=1, profile=None,
     start_wait=16, extra_params=None, retries=None, direct=False
@@ -1162,13 +1163,34 @@ def cluster_view(
 
     if profile is None:
         has_throwaway = True
-        profile = create_throwaway_profile(executable, ssh_client)
+        profile, profile_dir = create_throwaway_profile(
+            executable, ssh_client, profile_in_work_dir, work_dir
+        )
         print("Created profile {}".format(profile))
         sys.stdout.flush()
     else:
+        if ssh_client is None:
+            if os.path.isdir(profile) and os.path.isabs(profile):
+                # Return full_path if one is given
+                profile_dir = profile
+            else:
+                profile_dir = locate_profile(profile)
+        else:
+            remote_cmd = (
+                '{0} -E -c '
+                '"from IPython.utils.path import locate_profile; '
+                'import os; '
+                'print(\'{1}\' if os.path.isdir(\'{1}\') and os.path.isabs(\'{1}\') '
+                'else locate_profile(\'{1}\'))"'
+            ).format(executable, profile)
+
+            profile_dir = ssh_client.exec_command(
+                'source ~/.profile > /dev/null; ' + remote_cmd
+            )[1].read().decode('utf-8').strip()
+
         # ensure we have an .ipython directory to prevent issues
         # creating it during parallel startup
-        cmd = [sys.executable, "-E", "-c",
+        cmd = [executable, "-E", "-c",
                "from IPython import start_ipython; start_ipython()",
                "profile", "create", "--parallel"] + _get_profile_args(profile)
         if ssh_client is None:
@@ -1209,9 +1231,10 @@ def cluster_view(
             print("Retry to start cluster...")
             sys.stdout.flush()
 
+    client = None
     try:
-        url_file, profile_dir = get_url_file(
-            profile, cluster_id, executable,
+        url_file = get_url_file(
+            profile, profile_dir, cluster_id, executable,
             ssh_client=ssh_client, timeout=start_wait * 60
         )
         print("URL file: {}".format(url_file))
@@ -1324,27 +1347,31 @@ def _slurm_version():
 
 # ## Temporary profile management
 def create_throwaway_profile(
-    executable, ssh_client=None, in_working_dir=False, working_dir=None
+    executable, ssh_client=None, in_work_dir=False, work_dir=None
 ):
     profile = str(uuid.uuid1())
-    if in_working_dir:
-        if working_dir is None:
+    if in_work_dir:
+        if work_dir is None:
             raise ValueError
 
         profile = os.path.join(
-            working_dir, "profile_{}".format(profile)
+            work_dir, "profile_{}".format(profile)
         )
+        profile_dir = profile
 
     cmd = [
         executable, "-E", "-c",
         "from IPython import start_ipython; start_ipython()",
         "profile", "create",
-        profile if not in_working_dir or working_dir is None
+        profile if not in_work_dir or work_dir is None
         else "--profile-dir={}".format(profile),
         "--parallel"
     ]
     if ssh_client is None:
         subprocess.check_call(cmd)
+        if not in_work_dir:
+            profile_dir = locate_profile(profile)
+
     else:
         remote_cmd = ' '.join([
             '"{}"'.format(item) if ' ' in item else item
@@ -1353,37 +1380,33 @@ def create_throwaway_profile(
         ssh_client.exec_command(
             'source ~/.profile; ' + remote_cmd
         )
+        if not in_work_dir:
+            remote_cmd = (
+                '{0} -E -c '
+                '"from IPython.utils.path import locate_profile; '
+                'import os; '
+                'print(\'{1}\' if os.path.isdir(\'{1}\') and os.path.isabs(\'{1}\') '
+                'else locate_profile(\'{1}\'))"'
+            ).format(executable, profile)
 
-    return profile
+            profile_dir = ssh_client.exec_command(
+                'source ~/.profile > /dev/null; ' + remote_cmd
+            )[1].read().decode('utf-8').strip()
+
+    return profile, profile_dir
 
 
-def get_url_file(profile, cluster_id, executable, ssh_client=None, timeout=60):
+def get_url_file(
+    profile, profile_dir, cluster_id, executable, ssh_client=None, timeout=60
+):
 
     url_file = "ipcontroller-{0}-client.json".format(cluster_id)
 
     if ssh_client is None:
-        if os.path.isdir(profile) and os.path.isabs(profile):
-            # Return full_path if one is given
-            return os.path.join(profile, "security", url_file), profile
-
-        profile_dir = locate_profile(profile)
-        return (
-            os.path.join(locate_profile(profile), "security", url_file),
-            profile_dir
-        )
-
-    remote_cmd = (
-        '{0} -E -c '
-        '"from IPython.utils.path import locate_profile; '
-        'print(locate_profile(\'{1}\'))"'
-    ).format(executable, profile)
-
-    remote_profile_dir = ssh_client.exec_command(
-        'source ~/.profile > /dev/null; ' + remote_cmd
-    )[1].read().decode('utf-8').strip()
+        return os.path.join(profile_dir, "security", url_file)
 
     remote_url_file = os.path.join(
-        remote_profile_dir, "security", url_file
+        profile_dir, "security", url_file
     )
 
     # copy connection file
@@ -1408,7 +1431,7 @@ def get_url_file(profile, cluster_id, executable, ssh_client=None, timeout=60):
     local_file = f.name
     f.close()
 
-    return os.path.join(local_file), remote_profile_dir
+    return local_file
 
 
 def delete_profile(profile_dir, cluster_id, ssh_client=None):
