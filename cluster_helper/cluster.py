@@ -1109,9 +1109,11 @@ def _stop(profile, profile_dir, cluster_id, executable, ssh_client=None):
     if ssh_client is None:
         subprocess.check_call(args)
     else:
-        ssh_client.exec_command(
+        print("Stopping remote cluster: {}".format(' '.join(args)))
+        ret = ssh_client.exec_command(
             'source ~/.profile; ' + ' '.join(args)
         )
+        print(ret[2].read().decode('utf-8').strip())
 
 
 @contextlib.contextmanager
@@ -1467,6 +1469,7 @@ def delete_profile(profile_dir, cluster_id, ssh_client=None):
             raise ValueError("Cannot find {0} to remove, "
                             "something is wrong.".format(dir_to_remove))
     else:
+        time.sleep(5)
         ssh_client.exec_command(
             'for (( i=1; i <= 10; i++)); do if ! [ -e {1}/pid/ipcluster-{2}.pid ]; then sleep 5; test -e {0} && rm -rf {1}; break; fi; sleep 5; done'.format(
                 os.path.join(profile_dir, 'ipython_config.py'),
