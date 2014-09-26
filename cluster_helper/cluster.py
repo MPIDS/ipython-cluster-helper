@@ -936,8 +936,8 @@ cd $PBS_O_WORKDIR
         return super(BcbioPBSPROControllerLauncher, self).start(1)
 
 
-def _get_profile_args(profile):
-    if os.path.isdir(profile) and os.path.isabs(profile):
+def _get_profile_args(profile, profile_dir):
+    if profile == profile_dir:
         return ["--profile-dir={}".format(profile)]
     else:
         return ["--profile={}".format(profile)]
@@ -980,9 +980,11 @@ def _scheduler_resources(scheduler, params, queue):
     return ";".join(resources), specials
 
 
-def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
-           extra_params, executable, ssh_client=None, cluster='Bcbio',
-           work_dir=None):
+def _start(
+    scheduler, profile, profile_dir, queue, num_jobs, cores_per_job, cluster_id,
+    extra_params, executable, ssh_client=None, cluster='Bcbio',
+    work_dir=None
+):
     """Starts cluster from commandline.
     """
     ns = "cluster_helper.cluster"
@@ -1044,7 +1046,7 @@ def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
          ]
     if work_dir is not None:
        args += ["--IPClusterEngines.work_dir={}".format(work_dir)]
-    args += _get_profile_args(profile)
+    args += _get_profile_args(profile, profile_dir)
     if mincores > 1 and mincores > cores_per_job:
         args += ["--{}.numengines={}".format(engine_class, mincores)]
     if specials.get("pename"):
@@ -1077,7 +1079,7 @@ def _start(scheduler, profile, queue, num_jobs, cores_per_job, cluster_id,
     return cluster_id
 
 
-def _start_local(cores, profile, cluster_id):
+def _start_local(cores, profile, profile_dir, cluster_id):
     """Start a local non-distributed IPython engine. Useful for testing
     """
     args = [sys.executable, ] + cluster_cmd_argv + [
@@ -1088,7 +1090,7 @@ def _start_local(cores, profile, cluster_id):
         "--cluster-id={}".format(cluster_id),
         "--n={}".format(cores)
     ]
-    args += _get_profile_args(profile)
+    args += _get_profile_args(profile, profile_dir)
     subprocess.check_call(args)
     return cluster_id
 
@@ -1097,12 +1099,12 @@ def _start_local(cores, profile, cluster_id):
 #     _stop(view.clusterhelper["profile"], view.clusterhelper["cluster_id"])
 
 
-def _stop(profile, cluster_id, executable, ssh_client=None):
+def _stop(profile, profile_dir, cluster_id, executable, ssh_client=None):
     args = [executable, ] + cluster_cmd_argv + [
         "stop",
         "--cluster-id={}".format(cluster_id)
     ]
-    args += _get_profile_args(profile)
+    args += _get_profile_args(profile, profile_dir)
 
     if ssh_client is None:
         subprocess.check_call(args)
@@ -1192,7 +1194,9 @@ def cluster_view(
         # creating it during parallel startup
         cmd = [executable, "-E", "-c",
                "from IPython import start_ipython; start_ipython()",
-               "profile", "create", "--parallel"] + _get_profile_args(profile)
+               "profile", "create", "--parallel"] + _get_profile_args(
+                   profile, profile_dir
+               )
         if ssh_client is None:
             subprocess.check_call(cmd)
         else:
@@ -1207,16 +1211,18 @@ def cluster_view(
     num_tries = 0
 
     cluster_id = str(uuid.uuid4())
+    print("Cluster profile: {}".format(profile))
+    print("Cluster profile directory: {}".format(profile_dir))
     print("Cluster ID: {}".format(cluster_id))
     sys.stdout.flush()
 
     while 1:
         try:
             if extra_params.get("run_local"):
-                _start_local(num_jobs, profile, cluster_id)
+                _start_local(num_jobs, profile, profile_dir, cluster_id)
             else:
                 _start(
-                    scheduler, profile, queue, num_jobs,
+                    scheduler, profile, profile_dir, queue, num_jobs,
                     cores_per_job, cluster_id, extra_params,
                     executable, ssh_client, cluster=cluster, work_dir=work_dir
                 )
@@ -1257,7 +1263,7 @@ def cluster_view(
                     "Engine(s) that were up have shutdown prematurely. "
                     "Aborting cluster startup."
                 )
-                _stop(profile, cluster_id, executable, ssh_client)
+                _stop(profile, profile_dir, cluster_id, executable, ssh_client)
                 sys.exit(1)
             max_up = up
             time.sleep(delay)
@@ -1284,7 +1290,7 @@ def cluster_view(
     finally:
         if client:
             _shutdown(client)
-        _stop(profile, cluster_id, executable, ssh_client)
+        _stop(profile, profile_dir, cluster_id, executable, ssh_client)
         if has_throwaway:
             delete_profile(profile_dir, cluster_id, ssh_client)
         ssh_client.close()
